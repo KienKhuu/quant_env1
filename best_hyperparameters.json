@@ -1,0 +1,25 @@
+{
+    "LSTM": {
+        "hidden_dim": 64,
+        "lr": 0.0010502105436744284,
+        "weight_decay": 0.0002607024758370766
+    },
+    "GRU": {
+        "hidden_dim": 32,
+        "lr": 0.004093813608598782,
+        "weight_decay": 0.0008536189862866829
+    },
+    "TS2Vec": {
+        "hidden_dim": 128,
+        "num_blocks": 3,
+        "lr": 0.0008152843673110737,
+        "weight_decay": 2.3102018878452926e-05
+    },
+    "FusedModel": {
+        "hidden_dim": 128,
+        "num_blocks": 2,
+        "lr": 0.002620863021537752,
+        "weight_decay": 1.4322493718230246e-05,
+        "corr_threshold": 0.4
+    }
+}
