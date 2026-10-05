@@ -417,8 +417,8 @@ def train_standalone_ts2vec(
 
             s_A = random.randint(0, T - T_crop)
             s_B = random.randint(0, T - T_crop)
-            m_A = (torch.rand(B, T_crop, C) > 0.2).float()
-            m_B = (torch.rand(B, T_crop, C) > 0.2).float()
+            m_A = (torch.rand(B, T_crop, C, device=device) > 0.2).float()
+            m_B = (torch.rand(B, T_crop, C, device=device) > 0.2).float()
 
             view_A = x_b[:, s_A : s_A + T_crop, :] * m_A
             view_B = x_b[:, s_B : s_B + T_crop, :] * m_B
