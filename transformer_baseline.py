@@ -90,10 +90,10 @@ def train_transformer_model(
             optimizer.zero_grad()
 
             if model.__class__.__name__ == "Model" and hasattr(model, "forecast"):
-                # Truyền batch_mark vào x_mark_enc. x_dec giữ nguyên zero vì bị model bỏ qua.
+                x_mark_enc = torch.zeros(batch_x.size(0), batch_x.size(1), 1).to(device)
                 x_dec = torch.zeros(batch_x.size(0), 1, batch_x.size(2)).to(device)
-                x_mark_dec = torch.zeros(batch_x.size(0), 1, 4).to(device)
-                outputs = model(batch_x, batch_mark, x_dec, x_mark_dec)
+                x_mark_dec = torch.zeros(batch_x.size(0), 1, 1).to(device)
+                outputs = model(batch_x, x_mark_enc, x_dec, x_mark_dec)
             else:
                 outputs = model(batch_x)
 
@@ -107,9 +107,10 @@ def train_transformer_model(
         model.eval()
         with torch.no_grad():
             if hasattr(model, "forecast"):
+                x_mark_enc = torch.zeros(X_val_t.size(0), X_val_t.size(1), 1).to(device)
                 x_dec = torch.zeros(X_val_t.size(0), 1, X_val_t.size(2)).to(device)
-                x_mark_dec = torch.zeros(X_val_t.size(0), 1, 4).to(device)
-                val_out = model(X_val_t, X_mark_val_t, x_dec, x_mark_dec)
+                x_mark_dec = torch.zeros(X_val_t.size(0), 1, 1).to(device)
+                val_out = model(X_val_t, x_mark_enc, x_dec, x_mark_dec)
             else:
                 val_out = model(X_val_t)
 
@@ -172,14 +173,6 @@ def main():
     X_val_spy = X_all[val_mask, spy_idx, :, :]
     y_val_spy = y_norm_all[val_mask, spy_idx]
     X_test_spy = X_all[test_mask, spy_idx, :, :]
-
-    # Tích hợp Time Features
-    B_total = len(X_all)
-    X_mark_all = build_time_features(aligned_dates, T, B_total)
-
-    X_mark_train = X_mark_all[train_mask]
-    X_mark_val = X_mark_all[val_mask]
-    X_mark_test = X_mark_all[test_mask]
 
     configs = DotDict(
         {
