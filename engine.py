@@ -276,15 +276,12 @@ class RevINQuantEngine:
         mu_test: np.ndarray,
         sigma_test: np.ndarray,
     ) -> np.ndarray:
-        """
-        Executes forward inference and de-normalizes outputs directly back to true USD prices.
-        """
         self.predictor_head.eval()
         self.backbone.eval()
         with torch.no_grad():
             Z = self.backbone(
-                torch.tensor(X_test, dtype=torch.float32),
-                torch.tensor(A_test, dtype=torch.float32),
+                torch.tensor(X_test, dtype=torch.float32).to(self.device),
+                torch.tensor(A_test, dtype=torch.float32).to(self.device),
             )
             pred_norm = self.predictor_head(Z[:, :, -1, :]).squeeze(-1).cpu().numpy()
             pred_usd = pred_norm * sigma_test + mu_test
