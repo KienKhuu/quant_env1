@@ -286,7 +286,7 @@ class RevINQuantEngine:
                 torch.tensor(X_test, dtype=torch.float32),
                 torch.tensor(A_test, dtype=torch.float32),
             )
-            pred_norm = self.predictor_head(Z[:, :, -1, :]).squeeze(-1).numpy()
+            pred_norm = self.predictor_head(Z[:, :, -1, :]).squeeze(-1).cpu().numpy()
             pred_usd = pred_norm * sigma_test + mu_test
         return pred_usd
 
@@ -511,6 +511,6 @@ def train_standalone_ts2vec(
     predictor_head.eval()
     with torch.no_grad():
         z_te = backbone(torch.tensor(X_test, dtype=torch.float32).to(device))
-        pred_norm = predictor_head(z_te[:, -1, :]).squeeze(-1).numpy()
+        pred_norm = predictor_head(z_te[:, -1, :]).squeeze(-1).cpu().numpy()
 
     return pred_norm * sigma_test + mu_test
