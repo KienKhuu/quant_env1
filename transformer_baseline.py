@@ -30,10 +30,10 @@ def build_time_features(aligned_dates, T, B):
     """
     dates = pd.to_datetime(aligned_dates)
 
-    month = (dates.dt.month.values / 12.0) - 0.5
-    day = (dates.dt.day.values / 31.0) - 0.5
-    weekday = (dates.dt.weekday.values / 6.0) - 0.5
-    dayofyear = (dates.dt.dayofyear.values / 366.0) - 0.5
+    month = (dates.month / 12.0) - 0.5
+    day = (dates.day / 31.0) - 0.5
+    weekday = (dates.weekday / 6.0) - 0.5
+    dayofyear = (dates.dayofyear / 366.0) - 0.5
 
     # Ma trận [Total_Days, 4]
     time_feat = np.stack([month, day, weekday, dayofyear], axis=1)
@@ -173,6 +173,14 @@ def main():
     X_val_spy = X_all[val_mask, spy_idx, :, :]
     y_val_spy = y_norm_all[val_mask, spy_idx]
     X_test_spy = X_all[test_mask, spy_idx, :, :]
+
+    # Tích hợp Time Features
+    B_total = len(X_all)
+    X_mark_all = build_time_features(aligned_dates, T, B_total)
+
+    X_mark_train = X_mark_all[train_mask]
+    X_mark_val = X_mark_all[val_mask]
+    X_mark_test = X_mark_all[test_mask]
 
     configs = DotDict(
         {
