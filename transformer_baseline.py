@@ -2,6 +2,7 @@ import os
 import torch
 import torch.nn as nn
 import numpy as np
+import pandas as pd
 
 # Import your existing pipeline modules
 from dataset import (
@@ -22,12 +23,47 @@ class DotDict(dict):
     __delattr__ = dict.__delitem__
 
 
+def build_time_features(aligned_dates, T, B):
+    """
+    Trích xuất 4 đặc trưng thời gian (Month, Day, Weekday, DayOfYear)
+    và scale về khoảng [-0.5, 0.5] theo chuẩn TSlib.
+    """
+    dates = pd.to_datetime(aligned_dates)
+
+    month = (dates.dt.month.values / 12.0) - 0.5
+    day = (dates.dt.day.values / 31.0) - 0.5
+    weekday = (dates.dt.weekday.values / 6.0) - 0.5
+    dayofyear = (dates.dt.dayofyear.values / 366.0) - 0.5
+
+    # Ma trận [Total_Days, 4]
+    time_feat = np.stack([month, day, weekday, dayofyear], axis=1)
+
+    # Cắt thành các cửa sổ trượt T=30
+    X_mark_all = np.zeros((B, T, 4), dtype=np.float32)
+    for b in range(B):
+        X_mark_all[b] = time_feat[b : b + T]
+
+    return X_mark_all
+
+
 def train_transformer_model(
-    model, X_train, y_train, X_val, y_val, epochs=50, lr=1e-3, patience=10, device="cpu"
+    model,
+    X_train,
+    y_train,
+    X_mark_train,
+    X_val,
+    y_val,
+    X_mark_val,
+    epochs=50,
+    lr=1e-3,
+    patience=10,
+    device="cpu",
 ):
+    # Đóng gói 3 tensor: Đặc trưng giá, Nhãn, Đặc trưng thời gian
     train_data = torch.utils.data.TensorDataset(
         torch.tensor(X_train, dtype=torch.float32),
         torch.tensor(y_train, dtype=torch.float32),
+        torch.tensor(X_mark_train, dtype=torch.float32),
     )
     train_loader = torch.utils.data.DataLoader(train_data, batch_size=32, shuffle=True)
 
@@ -41,19 +77,23 @@ def train_transformer_model(
 
     X_val_t = torch.tensor(X_val, dtype=torch.float32).to(device)
     y_val_t = torch.tensor(y_val, dtype=torch.float32).to(device)
+    X_mark_val_t = torch.tensor(X_mark_val, dtype=torch.float32).to(device)
 
     for epoch in range(epochs):
         model.train()
-        for batch_x, batch_y in train_loader:
-            batch_x, batch_y = batch_x.to(device), batch_y.to(device)
+        for batch_x, batch_y, batch_mark in train_loader:
+            batch_x, batch_y, batch_mark = (
+                batch_x.to(device),
+                batch_y.to(device),
+                batch_mark.to(device),
+            )
             optimizer.zero_grad()
 
-            # iTransformer requires 4 inputs, PatchTST requires 1
             if model.__class__.__name__ == "Model" and hasattr(model, "forecast"):
-                x_mark_enc = torch.zeros(batch_x.size(0), batch_x.size(1), 1).to(device)
+                # Truyền batch_mark vào x_mark_enc. x_dec giữ nguyên zero vì bị model bỏ qua.
                 x_dec = torch.zeros(batch_x.size(0), 1, batch_x.size(2)).to(device)
-                x_mark_dec = torch.zeros(batch_x.size(0), 1, 1).to(device)
-                outputs = model(batch_x, x_mark_enc, x_dec, x_mark_dec)
+                x_mark_dec = torch.zeros(batch_x.size(0), 1, 4).to(device)
+                outputs = model(batch_x, batch_mark, x_dec, x_mark_dec)
             else:
                 outputs = model(batch_x)
 
@@ -67,10 +107,9 @@ def train_transformer_model(
         model.eval()
         with torch.no_grad():
             if hasattr(model, "forecast"):
-                x_mark_enc = torch.zeros(X_val_t.size(0), X_val_t.size(1), 1).to(device)
                 x_dec = torch.zeros(X_val_t.size(0), 1, X_val_t.size(2)).to(device)
-                x_mark_dec = torch.zeros(X_val_t.size(0), 1, 1).to(device)
-                val_out = model(X_val_t, x_mark_enc, x_dec, x_mark_dec)
+                x_mark_dec = torch.zeros(X_val_t.size(0), 1, 4).to(device)
+                val_out = model(X_val_t, X_mark_val_t, x_dec, x_mark_dec)
             else:
                 val_out = model(X_val_t)
 
@@ -134,12 +173,20 @@ def main():
     y_val_spy = y_norm_all[val_mask, spy_idx]
     X_test_spy = X_all[test_mask, spy_idx, :, :]
 
+    # Tích hợp Time Features
+    B_total = len(X_all)
+    X_mark_all = build_time_features(aligned_dates, T, B_total)
+
+    X_mark_train = X_mark_all[train_mask]
+    X_mark_val = X_mark_all[val_mask]
+    X_mark_test = X_mark_all[test_mask]
+
     configs = DotDict(
         {
             "seq_len": T,
             "pred_len": 1,
             "output_attention": False,
-            "use_norm": True,
+            "use_norm": False,
             "d_model": 64,
             "embed": "timeF",
             "freq": "d",
@@ -151,11 +198,11 @@ def main():
             "activation": "gelu",
             "e_layers": 2,
             "enc_in": 5,
-            "patch_len": 15,
-            "stride": 8,
+            "patch_len": 6,
+            "stride": 3,
             "padding_patch": "end",
             "individual": 0,
-            "revin": 1,
+            "revin": 0,
             "affine": 0,
             "subtract_last": 0,
             "decomposition": 0,
@@ -167,20 +214,27 @@ def main():
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    print("[2/3] Training iTransformer (Restricted 5D SPY Input)...")
+    print("[2/3] Training iTransformer (Restricted 5D SPY Input + Time Features)...")
     set_seed(42)
     itransformer = iTransformer.Model(configs)
     itransformer = train_transformer_model(
-        itransformer, X_train_spy, y_train_spy, X_val_spy, y_val_spy, device=device
+        itransformer,
+        X_train_spy,
+        y_train_spy,
+        X_mark_train,
+        X_val_spy,
+        y_val_spy,
+        X_mark_val,
+        device=device,
     )
 
     itransformer.eval()
     with torch.no_grad():
         X_test_t = torch.tensor(X_test_spy, dtype=torch.float32).to(device)
-        x_mark_enc = torch.zeros(X_test_t.size(0), X_test_t.size(1), 1).to(device)
+        X_mark_test_t = torch.tensor(X_mark_test, dtype=torch.float32).to(device)
         x_dec = torch.zeros(X_test_t.size(0), 1, X_test_t.size(2)).to(device)
-        x_mark_dec = torch.zeros(X_test_t.size(0), 1, 1).to(device)
-        preds_i = itransformer(X_test_t, x_mark_enc, x_dec, x_mark_dec)
+        x_mark_dec = torch.zeros(X_test_t.size(0), 1, 4).to(device)
+        preds_i = itransformer(X_test_t, X_mark_test_t, x_dec, x_mark_dec)
         if len(preds_i.shape) == 3:
             preds_i = preds_i[:, -1, 0]
         preds_i = preds_i.cpu().numpy()
@@ -190,8 +244,16 @@ def main():
     print("[3/3] Training PatchTST (Restricted 5D SPY Input)...")
     set_seed(42)
     patchtst = PatchTST.Model(configs)
+    # PatchTST chỉ nhận 1 đầu vào, bỏ qua X_mark bên trong model
     patchtst = train_transformer_model(
-        patchtst, X_train_spy, y_train_spy, X_val_spy, y_val_spy, device=device
+        patchtst,
+        X_train_spy,
+        y_train_spy,
+        X_mark_train,
+        X_val_spy,
+        y_val_spy,
+        X_mark_val,
+        device=device,
     )
 
     patchtst.eval()
